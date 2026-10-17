@@ -17,6 +17,8 @@ Laguna-S-2.1 ternary, 2.28 GB resident, 26.42 GB of experts):
 
 import os
 
+import pytest
+
 from turboquant_mlx.cache_budget import (
     MIN_BUDGET_BYTES,
     auto_cache_budget,
@@ -173,3 +175,247 @@ def test_local_path_typo_says_so(tmp_path):
     # a real repo id must still be treated as remote, not as a broken path
     target, remote = _resolve("manjunathshiva/Laguna-S-2.1-tqTe-g64")
     assert remote or os.path.isdir(target)
+
+
+# --------------------------------------------------------------------------
+# The working set itself. MLX's CPU backend on Linux reports no Metal working
+# set (device_info() is just architecture + device_name), and every `auto`
+# default used to index it and die with KeyError.
+# --------------------------------------------------------------------------
+
+_GIB = float(1 << 30)
+_CPU_DEVICE_INFO = {"architecture": "x86_64", "device_name": "cpu"}
+
+
+@pytest.fixture(autouse=True)
+def _no_host_cgroup(monkeypatch):
+    # the host running the tests may itself be a memory-limited container
+    from turboquant_mlx import cache_budget
+
+    monkeypatch.setattr(cache_budget, "_PROC_SELF_CGROUP",
+                        "/nonexistent/proc/self/cgroup")
+
+
+def _fake_sysconf(page, pages):
+    def sysconf(name):
+        return {"SC_PAGE_SIZE": page, "SC_PHYS_PAGES": pages}[name]
+    return sysconf
+
+
+def test_working_set_is_metals_figure_when_there_is_one(monkeypatch):
+    import mlx.core as mx
+
+    from turboquant_mlx import cache_budget
+
+    monkeypatch.setattr(mx, "device_info", lambda: {
+        **_CPU_DEVICE_INFO, "max_recommended_working_set_size": 12_710_000_000})
+    monkeypatch.setattr(cache_budget, "physical_ram_bytes",
+                        lambda: pytest.fail("RAM read with Metal present"))
+    assert cache_budget.working_set_bytes() == (12_710_000_000, False)
+
+
+def test_working_set_without_metal_is_the_ram_estimate(monkeypatch):
+    import mlx.core as mx
+
+    from turboquant_mlx import cache_budget
+
+    monkeypatch.setattr(mx, "device_info", lambda: dict(_CPU_DEVICE_INFO))
+    monkeypatch.setattr(cache_budget, "physical_ram_bytes", lambda: 16 * _GIB)
+    wss, estimated = cache_budget.working_set_bytes()
+    assert estimated is True
+    assert wss == int(cache_budget.estimate_wss(16 * _GIB))
+
+
+def test_working_set_survives_device_info_raising(monkeypatch):
+    import mlx.core as mx
+
+    from turboquant_mlx import cache_budget
+
+    def boom():
+        raise RuntimeError("no device")
+
+    monkeypatch.setattr(mx, "device_info", boom)
+    monkeypatch.setattr(cache_budget, "physical_ram_bytes", lambda: 16 * _GIB)
+    assert cache_budget.working_set_bytes()[1] is True
+
+
+def test_working_set_is_none_without_metal_or_ram(monkeypatch):
+    import mlx.core as mx
+
+    from turboquant_mlx import cache_budget
+
+    monkeypatch.setattr(mx, "device_info", lambda: dict(_CPU_DEVICE_INFO))
+    monkeypatch.setattr(cache_budget, "physical_ram_bytes", lambda: None)
+    assert cache_budget.working_set_bytes() is None
+
+
+def test_physical_ram_on_linux_comes_from_sysconf(monkeypatch):
+    import subprocess
+    import sys
+
+    from turboquant_mlx import cache_budget
+
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(subprocess, "check_output",
+                        lambda *a, **k: pytest.fail("sysctl run on Linux"))
+    monkeypatch.setattr(os, "sysconf", _fake_sysconf(4096, 4_194_304))
+    assert cache_budget.physical_ram_bytes() == 4096 * 4_194_304
+
+
+def test_physical_ram_unreadable_is_none(monkeypatch):
+    import sys
+
+    from turboquant_mlx import cache_budget
+
+    def no_sysconf(name):
+        raise ValueError(name)
+
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(os, "sysconf", no_sysconf)
+    assert cache_budget.physical_ram_bytes() is None
+    # sysconf answers -1 for a value it does not know
+    monkeypatch.setattr(os, "sysconf", _fake_sysconf(4096, -1))
+    assert cache_budget.physical_ram_bytes() is None
+
+
+def test_physical_ram_on_macos_comes_from_sysctl(monkeypatch):
+    import subprocess
+    import sys
+
+    from turboquant_mlx import cache_budget
+
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(subprocess, "check_output",
+                        lambda argv: b"17179869184\n"
+                        if argv == ["sysctl", "-n", "hw.memsize"] else None)
+    monkeypatch.setattr(os, "sysconf", _fake_sysconf(1, 1))
+    assert cache_budget.physical_ram_bytes() == 17179869184
+
+
+def _cgroups(monkeypatch, tmp_path, proc_self_cgroup, files):
+    """A fake cgroup mount: ``files`` maps paths under it to limits."""
+    from turboquant_mlx import cache_budget
+
+    root = tmp_path / "cgroup"
+    for rel, value in files.items():
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(value + "\n")
+    proc = tmp_path / "proc_self_cgroup"
+    proc.write_text(proc_self_cgroup)
+    monkeypatch.setattr(cache_budget, "_CGROUP_ROOT", str(root))
+    monkeypatch.setattr(cache_budget, "_PROC_SELF_CGROUP", str(proc))
+
+
+def _limit_files(monkeypatch, tmp_path, v2=None, v1=None):
+    # a container with its own cgroup namespace: its cgroup is the mount root
+    files = {}
+    if v2 is not None:
+        files["memory.max"] = v2
+    if v1 is not None:
+        files["memory/memory.limit_in_bytes"] = v1
+    _cgroups(monkeypatch, tmp_path, "0::/\n" if v1 is None else
+             "7:memory:/\n", files)
+
+
+@pytest.fixture
+def linux_16gib(monkeypatch):
+    import sys
+
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(os, "sysconf", _fake_sysconf(4096, 4_194_304))
+    return 4096 * 4_194_304
+
+
+def test_physical_ram_in_a_container_is_its_cgroup_v2_limit(
+        monkeypatch, tmp_path, linux_16gib):
+    from turboquant_mlx import cache_budget
+
+    _limit_files(monkeypatch, tmp_path, str(int(4 * _GIB)), None)
+    assert cache_budget.physical_ram_bytes() == 4 * _GIB
+
+
+def test_physical_ram_reads_cgroup_v1_when_there_is_no_v2(
+        monkeypatch, tmp_path, linux_16gib):
+    from turboquant_mlx import cache_budget
+
+    _limit_files(monkeypatch, tmp_path, None, str(int(2 * _GIB)))
+    assert cache_budget.physical_ram_bytes() == 2 * _GIB
+
+
+@pytest.mark.parametrize("unlimited", ["max", str(2**63 - 4096)])
+def test_physical_ram_without_a_cgroup_limit_is_the_hosts(
+        monkeypatch, tmp_path, linux_16gib, unlimited):
+    from turboquant_mlx import cache_budget
+
+    # v2 says "max"; v1 says a page-rounded 2**63
+    _limit_files(monkeypatch, tmp_path, unlimited)
+    assert cache_budget.physical_ram_bytes() == linux_16gib
+
+
+def test_cgroup_limit_stands_in_when_sysconf_fails(monkeypatch, tmp_path):
+    import sys
+
+    from turboquant_mlx import cache_budget
+
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(os, "sysconf", _fake_sysconf(4096, -1))
+    _limit_files(monkeypatch, tmp_path, str(int(3 * _GIB)))
+    assert cache_budget.physical_ram_bytes() == 3 * _GIB
+
+
+def test_working_set_in_a_container_is_estimated_from_its_limit(
+        monkeypatch, tmp_path, linux_16gib):
+    import mlx.core as mx
+
+    from turboquant_mlx import cache_budget
+    from turboquant_mlx.cache_budget import estimate_wss
+
+    monkeypatch.setattr(mx, "device_info", lambda: {"device_name": "cpu"})
+    _limit_files(monkeypatch, tmp_path, str(int(4 * _GIB)))
+    assert cache_budget.working_set_bytes() == (int(estimate_wss(4 * _GIB)),
+                                                True)
+
+
+def test_physical_ram_in_a_systemd_service_is_its_cgroup_limit(
+        monkeypatch, tmp_path, linux_16gib):
+    from turboquant_mlx import cache_budget
+
+    # MemoryMax= on the service; the slice above it and the root are unlimited
+    _cgroups(monkeypatch, tmp_path, "0::/system.slice/tq.service\n", {
+        "system.slice/tq.service/memory.max": str(int(6 * _GIB)),
+        "system.slice/memory.max": "max",
+    })
+    assert cache_budget.physical_ram_bytes() == 6 * _GIB
+
+
+def test_an_ancestors_tighter_limit_wins(monkeypatch, tmp_path, linux_16gib):
+    from turboquant_mlx import cache_budget
+
+    _cgroups(monkeypatch, tmp_path, "0::/user.slice/user-501.slice/app\n", {
+        "user.slice/user-501.slice/app/memory.max": str(int(8 * _GIB)),
+        "user.slice/memory.max": str(int(5 * _GIB)),
+    })
+    assert cache_budget.physical_ram_bytes() == 5 * _GIB
+
+
+def test_v1_host_path_missing_in_the_container_falls_back_to_the_root(
+        monkeypatch, tmp_path, linux_16gib):
+    from turboquant_mlx import cache_budget
+
+    # without a cgroup namespace the container sees the host's path, but its
+    # own cgroup is mounted at the root
+    _cgroups(monkeypatch, tmp_path, "12:cpu,cpuacct:/docker/abc\n"
+             "7:memory:/docker/abc\n", {
+                 "memory/memory.limit_in_bytes": str(int(2 * _GIB)),
+             })
+    assert cache_budget.physical_ram_bytes() == 2 * _GIB
+
+
+
+def test_a_malformed_proc_self_cgroup_line_is_skipped(
+        monkeypatch, tmp_path, linux_16gib):
+    from turboquant_mlx import cache_budget
+
+    _cgroups(monkeypatch, tmp_path, "garbage\n0::/\n",
+             {"memory.max": str(int(4 * _GIB))})
+    assert cache_budget.physical_ram_bytes() == 4 * _GIB
