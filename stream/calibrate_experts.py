@@ -45,12 +45,14 @@ CALIB_PROMPTS = [
 
 
 def collect(args):
-    import turboquant_mlx.compat  # noqa: F401
     from mlx_lm import generate as mlx_generate
     from mlx_lm.sample_utils import make_sampler
 
+    from turboquant_mlx.compat import trust_local_kimi_k3
+
     from .loader import load_streaming
 
+    trust_local_kimi_k3(args.model)  # the user's own --model, before resolving
     model, tok, cache = load_streaming(
         args.model, cache_budget_gb=args.budget,
         prefetch_workers=8, prefetch_ahead=0,   # prefetch off — pure routing trace

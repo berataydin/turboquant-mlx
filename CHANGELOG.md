@@ -6,6 +6,28 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.28.1] - 2026-10-17
+
+### Security
+- **Kimi K3 tokenizer code is no longer trusted for models you did not pass as a
+  local directory**
+  ([GHSA-xccr-42wp-gxr2](https://github.com/manjunathshiva/turboquant-mlx/security/advisories/GHSA-xccr-42wp-gxr2)).
+  Since 0.19.0 the K3 tokenizer shim set `trust_remote_code=True` for any
+  directory whose `config.json` declared `kimi_k3`, which included the cache
+  snapshot a Hugging Face repo id resolves to and models named in a
+  `turboquant-serve` request. Trust is now decided from what you passed, before
+  anything is downloaded: only a local K3 directory given on the command line
+  (`--model`, `--hf-path`) runs its tokenizer code without asking. To load K3 by
+  Hub repo id, pass `--trust-remote-code`, which is new on `turboquant-generate`,
+  `stream_generate` and `turboquant-convert`; `turboquant-serve` now passes
+  mlx-lm's existing flag through to TurboQuant models instead of dropping it.
+  From Python, pass `tokenizer_config={"trust_remote_code": True}` to
+  `load_turboquant` / `load_streaming`, or register a local directory with
+  `turboquant_mlx.compat.trust_local_kimi_k3()`.
+- **`turboquant-serve-vlm` binds to `127.0.0.1` by default.** It inherited
+  mlx-vlm's `0.0.0.0`, which exposed the server to the whole network. Pass
+  `--host 0.0.0.0` to accept connections from other machines.
+
 ### Fixed
 
 - `mlx-lm` is capped below 0.32 (`mlx-lm>=0.31.3,<0.32`). mlx-lm 0.32 changed the

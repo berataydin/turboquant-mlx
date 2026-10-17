@@ -6,6 +6,8 @@ installed library versions. All patches are idempotent and self-disable
 once upstream catches up.
 """
 
+import os
+
 
 def _patch_nemotron_h_pattern():
     """Teach NemotronHConfig about MLP ("-") block types.
@@ -166,8 +168,8 @@ def _patch_compressed_tensors_mxfp4():
 
 def is_local_kimi_k3(model_path) -> bool:
     """True iff ``model_path`` is a local directory whose ``config.json``
-    declares ``model_type: "kimi_k3"`` — the gate for auto-trusting the K3
-    tokenizer code that ships inside the checkpoint directory."""
+    declares ``model_type: "kimi_k3"``. Only meaningful on a path the user
+    typed: a Hub repo id's cache snapshot is a local directory too."""
     import json
     from pathlib import Path
 
@@ -182,21 +184,46 @@ def is_local_kimi_k3(model_path) -> bool:
     return cfg.get("model_type") == "kimi_k3"
 
 
+# realpaths of the local K3 directories the user named on a command line
+_TRUSTED_K3_DIRS = set()
+
+
+def trust_local_kimi_k3(path_arg) -> bool:
+    """Opt the user's own model argument into K3 tokenizer trust.
+
+    Call with the argument exactly as the user gave it (``--model``,
+    ``--hf-path``), before anything resolves it. Only an existing local
+    directory whose ``config.json`` says ``kimi_k3`` is registered, by
+    realpath; returns whether it was. A Hub repo id is never registered, so
+    the cache snapshot it later resolves to never auto-trusts its own code.
+    """
+    if not is_local_kimi_k3(path_arg):
+        return False
+    _TRUSTED_K3_DIRS.add(os.path.realpath(path_arg))
+    return True
+
+
+def is_trusted_kimi_k3(model_path) -> bool:
+    """True iff ``model_path`` is a directory registered by
+    :func:`trust_local_kimi_k3`."""
+    return os.path.realpath(model_path) in _TRUSTED_K3_DIRS
+
+
 def _patch_kimi_k3_tokenizer_trust():
-    """Opt local Kimi K3 directories into their own tokenizer code.
+    """Opt registered local Kimi K3 directories into their own tokenizer code.
 
     K3 repos ship a custom tokenizer class (``tokenization_kimi.py``) that
     requires ``trust_remote_code=True`` to load — without it transformers
     either raises or blocks on an interactive prompt, which kills
     ``turboquant-generate``/``turboquant-serve`` on any converted K3 model.
 
-    The flag is injected only when the model path is a *local directory*
-    whose ``config.json`` says ``model_type: "kimi_k3"`` — never as a
-    blanket local-directory default. Downloading tokenizer code and
-    executing it are separate trust decisions (``hf download`` writes
-    ``tokenization_*.py`` without running it), so every other model keeps
-    transformers' explicit opt-in behavior, and an explicit
-    ``trust_remote_code`` from the caller always wins.
+    The flag is injected only for a directory the user named on the command
+    line (see :func:`trust_local_kimi_k3`). The tokenizer loader only ever
+    sees a path, and a Hub repo id or a model named in a server request has
+    already been resolved to a local snapshot by then, so the decision cannot
+    be made here. An explicit ``trust_remote_code`` from the caller always
+    wins; ``None`` (mlx-lm's server without ``--trust-remote-code``) counts
+    as unset.
     """
     import mlx_lm.tokenizer_utils as _tok
 
@@ -207,7 +234,8 @@ def _patch_kimi_k3_tokenizer_trust():
 
     def load(model_path, tokenizer_config_extra=None, eos_token_ids=None):
         extra = dict(tokenizer_config_extra or {})
-        if "trust_remote_code" not in extra and is_local_kimi_k3(model_path):
+        if (extra.get("trust_remote_code") is None
+                and is_trusted_kimi_k3(model_path)):
             extra["trust_remote_code"] = True
         return orig(model_path, extra, eos_token_ids=eos_token_ids)
 

@@ -187,6 +187,43 @@ class TestHelp:
         assert "mlx-vlm" in out
 
 
+class TestDefaultHost:
+    """mlx-vlm binds 0.0.0.0 by default; ours binds loopback unless asked."""
+
+    def test_loopback_is_added_when_no_host_given(self):
+        assert serve_vlm.with_default_host(["--port", "8080"]) == [
+            "--port", "8080", "--host", "127.0.0.1"]
+
+    @pytest.mark.parametrize("argv", [
+        ["--host", "0.0.0.0"], ["--host=0.0.0.0"], ["--host", "127.0.0.1"]])
+    def test_an_explicit_host_is_kept(self, argv):
+        assert serve_vlm.with_default_host(list(argv)) == argv
+
+    def test_main_hands_mlx_vlm_the_loopback_default(self, monkeypatch):
+        import types
+
+        seen = {}
+
+        def fake_server_main():
+            seen["argv"] = list(sys.argv[1:])
+
+        fake_cli = types.ModuleType("mlx_vlm.server.cli")
+        fake_cli.main = fake_server_main
+        monkeypatch.setitem(sys.modules, "mlx_vlm.server.cli", fake_cli)
+        monkeypatch.setattr(serve_vlm, "install_turboquant_loader", lambda: None)
+        monkeypatch.setattr(serve_vlm, "install_tool_call_suppression_fix",
+                            lambda: None)
+        monkeypatch.setattr(sys, "argv", ["turboquant-serve-vlm"])
+
+        serve_vlm.main(["--port", "8080"])
+        argv = seen["argv"]
+        assert argv[argv.index("--host") + 1] == "127.0.0.1"
+
+        serve_vlm.main(["--host", "0.0.0.0"])
+        assert seen["argv"].count("--host") == 1
+        assert "0.0.0.0" in seen["argv"]
+
+
 class TestChatTemplateDiscovery:
     def test_template_read_from_jinja_file(self, tmp_path):
         _write_model(tmp_path, {}, template="{{ reasoning_strength }}")

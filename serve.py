@@ -435,6 +435,11 @@ def _patch_loader(stream_config=None, cache_limit_mode=None,
                 "WARNING: --adapter-path is not supported for TurboQuant "
                 "models; ignoring.\n"
             )
+        # Only the trust flag is honoured here; None (no --trust-remote-code)
+        # leaves the decision to the compat gate, which trusts nothing a
+        # request can name except the operator's own --model directory.
+        tok_cfg = {"trust_remote_code":
+                   (tokenizer_config or {}).get("trust_remote_code")}
 
         if stream_config is not None:
             bud = stream_config["cache_budget_gb"]
@@ -446,13 +451,15 @@ def _patch_loader(stream_config=None, cache_limit_mode=None,
             # load_streaming returns (model, tok, cache); the cache stays alive
             # via the StreamingSwitchLinear modules that reference it.
             model, tokenizer, _cache = load_streaming(
-                model_path, ngram_offload=ngram_offload, **stream_config)
+                model_path, ngram_offload=ngram_offload,
+                tokenizer_config=tok_cfg, **stream_config)
         else:
             sys.stderr.write(
                 f"[turboquant-serve] Loading TurboQuant model from {model_path}\n"
             )
             model, tokenizer = load_turboquant(model_path, lazy=lazy,
-                                               ngram_offload=ngram_offload)
+                                               ngram_offload=ngram_offload,
+                                               tokenizer_config=tok_cfg)
         if cache_limit_mode is not None:
             _apply_metal_cache_limit(cache_limit_mode)
         if return_config:
@@ -461,6 +468,23 @@ def _patch_loader(stream_config=None, cache_limit_mode=None,
 
     _server_mod.load = _tq_aware_load
     _utils_mod.load = _tq_aware_load
+
+
+def _trust_operator_model(argv) -> None:
+    """Register the operator's own ``--model`` for K3 tokenizer trust.
+
+    Only the startup argument counts. A model named in a request reaches the
+    loader already resolved to a local path, so it is never auto-trusted
+    unless it is that same directory; ``--trust-remote-code`` trusts every
+    model, as in mlx-lm.
+    """
+    from turboquant_mlx.compat import trust_local_kimi_k3
+
+    for i, arg in enumerate(argv):
+        if arg == "--model" and i + 1 < len(argv):
+            trust_local_kimi_k3(argv[i + 1])
+        elif arg.startswith("--model="):
+            trust_local_kimi_k3(arg.split("=", 1)[1])
 
 
 def _extract_kv_args(argv):
@@ -940,6 +964,7 @@ def main() -> None:
         _install_prefill_stats(**prefill_stats_config)
     if prefill_keepalive_config is not None:
         _patch_prefill_keepalive(**prefill_keepalive_config)
+    _trust_operator_model(remaining)
     # Hand mlx_lm.server only the args it understands.
     sys.argv = [sys.argv[0], *remaining]
 

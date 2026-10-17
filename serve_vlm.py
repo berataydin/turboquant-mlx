@@ -26,9 +26,13 @@ it — it only teaches it the four things it cannot know about a TurboQuant VLM:
    content suppressor latches on the first reasoning token and the answer never
    reaches the client. See ``TOOL_CALL_SUPPRESSION_TRIGGER``.
 
+It also binds to ``127.0.0.1`` unless ``--host`` is given: mlx-vlm's own
+default is ``0.0.0.0``, which would expose the server to the whole network.
+
 Usage:
     turboquant-serve-vlm --model <tq-dir-or-repo> --port 8080
     turboquant-serve-vlm --model <tq-dir> --reasoning-strength low
+    turboquant-serve-vlm --model <tq-dir> --host 0.0.0.0   # reachable on the LAN
 
 Requires:  pip install "turboquant-mlx-full[vlm]"
 """
@@ -41,6 +45,9 @@ from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 logger = logging.getLogger("turboquant.serve_vlm")
+
+# Loopback unless the user asks otherwise; mlx-vlm's own default is 0.0.0.0.
+DEFAULT_HOST = "127.0.0.1"
 
 # Per-architecture (thinking_start, thinking_end) delimiters.
 #
@@ -246,6 +253,13 @@ def _has_option(argv, name: str) -> bool:
     return any(a == name or a.startswith(name + "=") for a in argv)
 
 
+def with_default_host(argv) -> list:
+    """Bind to DEFAULT_HOST unless `--host` is already given."""
+    if _has_option(argv, "--host"):
+        return argv
+    return argv + ["--host", DEFAULT_HOST]
+
+
 def build_server_argv(argv, model_path) -> list:
     """Add the channel delimiters this architecture needs, if not already set.
 
@@ -296,7 +310,12 @@ def main(argv=None):
             "                        takes one (Muse Glimmer: "
             "low/medium/high/xhigh, default\n"
             "                        high). Used when a request does not ask "
-            "for one.\n\n"
+            "for one.\n"
+            "  --host HOST           Defaults to 127.0.0.1 here, not mlx-vlm's "
+            "0.0.0.0.\n"
+            "                        Pass --host 0.0.0.0 to accept connections "
+            "from other\n"
+            "                        machines.\n\n"
             "Muse Glimmer also gets its reasoning channel split out of "
             "`content`\nautomatically; pass --thinking-start-token / "
             "--thinking-end-token to override.\n\n"
@@ -327,6 +346,7 @@ def main(argv=None):
 
     if resolved:
         server_argv = build_server_argv(server_argv, resolved)
+    server_argv = with_default_host(server_argv)
 
     from mlx_vlm.server.cli import main as server_main
 

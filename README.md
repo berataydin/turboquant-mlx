@@ -417,6 +417,9 @@ All `mlx_vlm.server` flags forward unchanged. Two things are handled for you:
   harnesses. Measured on `tq4-g64`: a tool-result turn cost **54 completion
   tokens at `low` versus 106 at the default `high`**, for the same answer.
 
+It listens on `127.0.0.1` unless you pass `--host` (mlx-vlm's own server binds
+`0.0.0.0`). Add `--host 0.0.0.0` to accept connections from other machines.
+
 #### Serve a model bigger than RAM (expert streaming)
 
 Passing `--cache-budget-gb` routes the loader through the streaming path, so a
@@ -1367,6 +1370,10 @@ python -m turboquant_mlx.stream.stream_generate \
     --max-tokens 500 --cache-budget-gb auto \
     --max-active-experts 8 --prefetch-workers 16 --fanout
 ```
+
+K3's tokenizer is custom code (`tokenization_kimi.py`). It runs without asking
+only when `--model` / `--hf-path` is a local K3 directory you passed on the
+command line; to load K3 by Hub repo id, add `--trust-remote-code`.
 
 Measured on a **Mac Studio (512 GB)** with a 506 GB expert cache and the shipped
 hot-expert list: **2.3 tok/s** at `--max-active-experts 8`, **1.2 tok/s** at

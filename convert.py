@@ -98,6 +98,7 @@ def convert(
     protect_expert_layers: list = None,
     protect_bits: int = 3,
     expert_layer_tiers: dict = None,
+    trust_remote_code: bool = False,
 ):
     """Convert a HuggingFace model to TurboQuant-compressed MLX format.
 
@@ -138,6 +139,9 @@ def convert(
         protect_bits: Codebook width for protected expert layers.
         expert_layer_tiers: ``{layer: "ternary" | "2" | "3" | "4"}``, a hand-chosen
             tier per MoE layer. See TurboQuantConfig.expert_layer_tiers.
+        trust_remote_code: Let the source's own tokenizer code run. A local
+            ``kimi_k3`` directory gets this without asking; a Hub repo id never
+            does.
     """
     from mlx_lm.utils import load, save
 
@@ -169,9 +173,10 @@ def convert(
     model, tokenizer, config = load(
         hf_path,
         # K3's custom tokenizer class (tokenization_kimi.py) needs the code
-        # opt-in; gated on a local kimi_k3 config so no other model gets it.
+        # opt-in; gated on the user's own path being a local kimi_k3 dir.
         tokenizer_config=(
-            {"trust_remote_code": True} if is_local_kimi_k3(hf_path) else {}
+            {"trust_remote_code": True}
+            if trust_remote_code or is_local_kimi_k3(hf_path) else {}
         ),
         return_config=True,
         lazy=True,
@@ -248,6 +253,13 @@ def configure_parser() -> argparse.ArgumentParser:
         "--hf-path", "--model",
         type=str, required=True,
         help="HuggingFace model path or local path",
+    )
+    parser.add_argument(
+        "--trust-remote-code",
+        action="store_true",
+        help="Allow the source's own tokenizer code (tokenization_*.py) to "
+             "run. Needed for Kimi K3 by Hub repo id; a local K3 directory "
+             "is trusted without it.",
     )
     parser.add_argument(
         "--mlx-path",
@@ -413,6 +425,7 @@ def main():
             protect_expert_layers=args.protect_expert_layers,
             protect_bits=args.protect_bits,
             expert_layer_tiers=args.expert_layer_tiers,
+            trust_remote_code=args.trust_remote_code,
         )
         # Applied here rather than threaded through convert_streaming: the head
         # is copied from the source shards after the fact either way, so the
@@ -447,6 +460,7 @@ def main():
         protect_expert_layers=args.protect_expert_layers,
         protect_bits=args.protect_bits,
         expert_layer_tiers=args.expert_layer_tiers,
+        trust_remote_code=args.trust_remote_code,
     )
 
 

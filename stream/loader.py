@@ -282,7 +282,7 @@ def load_streaming(model_path, cache_budget_gb=3.0, fast: bool = False,
                    use_page_cache: bool | None = None, use_hotlist: bool = True,
                    preload_pins: bool = True, wire_memory: bool = False,
                    learn_experts: bool = True, usage_file: str | None = None,
-                   ngram_offload: bool = False):
+                   ngram_offload: bool = False, tokenizer_config: dict | None = None):
     """Returns (model, tokenizer, cache).
 
     cache_budget_gb bounds total resident expert memory (LRU-evicted). Pass
@@ -322,12 +322,14 @@ def load_streaming(model_path, cache_budget_gb=3.0, fast: bool = False,
     force it.
     ngram_offload serves an n-gram embedding table from memory-mapped files instead
     of GPU memory (see ``turboquant_mlx.ngram_offload``); bit-identical output.
+    tokenizer_config is passed through to ``load_turboquant``.
     """
     local_path = str(resolve_model_path(model_path))
     if use_page_cache is None:
         use_page_cache = _auto_page_cache(local_path)
     model, tok = load_turboquant(local_path, lazy=True, fast=fast,
-                                 ngram_offload=ngram_offload)
+                                 ngram_offload=ngram_offload,
+                                 tokenizer_config=tokenizer_config)
     reader = SafetensorsExpertReader(local_path, use_page_cache=use_page_cache)
 
     expert_bytes = _streamed_expert_bytes(reader)

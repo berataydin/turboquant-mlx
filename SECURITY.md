@@ -6,10 +6,10 @@
 latest minor release. The previous minor receives a fix only if the issue is
 actively exploited and there is no reasonable upgrade path for users.
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 0.2.x   | :white_check_mark: |
-| 0.1.x   | :x: (please upgrade)|
+| Version  | Supported            |
+| -------- | -------------------- |
+| 0.28.x   | :white_check_mark:   |
+| < 0.28   | :x: (please upgrade) |
 
 ## Reporting a Vulnerability
 

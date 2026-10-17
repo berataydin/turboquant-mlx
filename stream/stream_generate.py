@@ -22,6 +22,7 @@ import time
 import mlx.core as mx
 
 import turboquant_mlx.compat  # noqa: F401
+from turboquant_mlx.compat import trust_local_kimi_k3
 from mlx_lm import generate as mlx_generate
 from mlx_lm.sample_utils import make_logits_processors, make_sampler
 
@@ -114,6 +115,10 @@ def main():
     p.add_argument("--ngram-offload", action="store_true",
                    help="Serve an n-gram embedding table (Qwen3.8-Flash-Next) from memory-mapped files on the CPU instead of GPU memory: ~17.9 GiB less resident on the 2-bit build, bit-identical output. Keep the model directory in place while the model is loaded. No effect on models without such a table.")
     p.add_argument("--no-chat-template", action="store_true")
+    p.add_argument("--trust-remote-code", action="store_true",
+                   help="Allow the model's own tokenizer code (tokenization_*.py) "
+                        "to run. Needed for Kimi K3 loaded by Hub repo id; a local "
+                        "K3 directory is trusted without it.")
     p.add_argument("--top-p", type=float, default=None,
                    help="Nucleus sampling threshold. Defaults to the model's "
                         "generation_config.json value when present, else disabled. "
@@ -137,6 +142,8 @@ def main():
                         "a second </think> is masked once one has been emitted.")
     args = p.parse_args()
 
+    # Before anything resolves args.model: only a local K3 dir is trusted.
+    trust_local_kimi_k3(args.model)
     t0 = time.time()
     model, tok, cache = load_streaming(
         args.model, cache_budget_gb=args.cache_budget_gb, fast=args.fast,
@@ -146,6 +153,8 @@ def main():
         use_page_cache=args.use_page_cache, use_hotlist=args.use_hotlist,
         learn_experts=args.learn_experts, usage_file=args.usage_file,
         wire_memory=args.wire_memory, ngram_offload=args.ngram_offload,
+        tokenizer_config=(
+            {"trust_remote_code": True} if args.trust_remote_code else None),
     )
     print(f"[stream] loaded in {time.time() - t0:.1f}s | resident RSS={_rss_gb():.2f} GB")
 

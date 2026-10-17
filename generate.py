@@ -23,6 +23,7 @@ import mlx.core as mx
 import mlx.nn as nn
 
 import turboquant_mlx.compat  # noqa: F401 — registers upstream patches on import
+from turboquant_mlx.compat import trust_local_kimi_k3
 from turboquant_mlx.config import TurboQuantConfig
 from turboquant_mlx.layers.polar_linear import PolarQuantizedLinear
 from turboquant_mlx.layers.polar_switch_linear import PolarQuantizedSwitchLinear
@@ -305,7 +306,8 @@ def resolve_model_path(path_or_hf_repo):
     return Path(_download(str(path_or_hf_repo)))
 
 
-def load_turboquant(model_path, lazy=False, fast=False, ngram_offload=False):
+def load_turboquant(model_path, lazy=False, fast=False, ngram_offload=False,
+                    tokenizer_config=None):
     """Load a TurboQuant-compressed model.
 
     Args:
@@ -317,6 +319,10 @@ def load_turboquant(model_path, lazy=False, fast=False, ngram_offload=False):
             from memory-mapped files on the CPU instead of GPU memory. Output is
             bit-identical; see ``turboquant_mlx.ngram_offload``. No effect on models
             without such a table.
+        tokenizer_config: Passed to mlx-lm's tokenizer loader, e.g.
+            ``{"trust_remote_code": True}`` to run a checkpoint's own tokenizer
+            code. Without it only a directory registered with
+            ``compat.trust_local_kimi_k3`` gets that trust.
 
     Returns:
         (model, tokenizer) tuple.
@@ -384,7 +390,7 @@ def load_turboquant(model_path, lazy=False, fast=False, ngram_offload=False):
         _disable_qjl(model)
 
     # Load tokenizer
-    tokenizer = load_tokenizer(model_path)
+    tokenizer = load_tokenizer(model_path, tokenizer_config)
 
     # A tokenizer exposes only its single eos_token_id, but a model may declare
     # several turn terminators in generation_config.json (Laguna ends a turn
@@ -476,6 +482,12 @@ def main():
         help="Serve an n-gram embedding table (Qwen3.8-Flash-Next) from memory-mapped files on the CPU instead of GPU memory: ~17.9 GiB less resident on the 2-bit build, bit-identical output. Keep the model directory in place while the model is loaded. No effect on models without such a table.",
     )
     parser.add_argument(
+        "--trust-remote-code", action="store_true",
+        help="Allow the model's own tokenizer code (tokenization_*.py) to run. "
+             "Needed for Kimi K3 loaded by Hub repo id; a local K3 directory "
+             "is trusted without it.",
+    )
+    parser.add_argument(
         "--min-tokens", type=int, default=0,
         help="Mask EOS until at least this many tokens are generated. "
              "Useful for thinking-mode models (Nemotron 3, etc.) whose chat "
@@ -516,8 +528,13 @@ def main():
 
     mode = "fast (QJL disabled)" if args.fast else "accurate (QJL enabled)"
     print(f"[INFO] Loading TurboQuant model from {args.model} [{mode}]")
-    model, tokenizer = load_turboquant(args.model, fast=args.fast,
-                                       ngram_offload=args.ngram_offload)
+    # Before anything resolves args.model: only a local K3 dir is trusted.
+    trust_local_kimi_k3(args.model)
+    model, tokenizer = load_turboquant(
+        args.model, fast=args.fast, ngram_offload=args.ngram_offload,
+        tokenizer_config=(
+            {"trust_remote_code": True} if args.trust_remote_code else None),
+    )
 
     if args.stop:
         from .sampling import resolve_stop_token

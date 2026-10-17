@@ -125,6 +125,7 @@ def convert_streaming(
     protect_bits: int = 3,
     expert_layer_tiers: dict = None,
     max_file_size_gb: int = MAX_FILE_SIZE_GB,
+    trust_remote_code: bool = False,
 ):
     """Convert an HF model to TurboQuant MLX format with bounded peak memory.
 
@@ -154,9 +155,10 @@ def convert_streaming(
     model, tokenizer, config = load(
         hf_path,
         # K3's custom tokenizer class (tokenization_kimi.py) needs the code
-        # opt-in; gated on a local kimi_k3 config so no other model gets it.
+        # opt-in; gated on the user's own path being a local kimi_k3 dir.
         tokenizer_config=(
-            {"trust_remote_code": True} if is_local_kimi_k3(hf_path) else {}
+            {"trust_remote_code": True}
+            if trust_remote_code or is_local_kimi_k3(hf_path) else {}
         ),
         return_config=True,
         lazy=True,
