@@ -2,6 +2,8 @@
 
 Extreme **weight** and **KV cache** compression for LLMs on Apple Silicon. MLX implementation of Google's [TurboQuant](https://arxiv.org/abs/2504.19874) (Zandieh et al., 2025) — Hadamard rotation + Lloyd-Max codebooks applied both to weights (compile time) and the KV cache (run time).
 
+**📖 Documentation: [manjunathshiva.github.io/turboquant-mlx](https://manjunathshiva.github.io/turboquant-mlx/)** — get started, pick a model for your Mac's memory, and guides for converting, serving, coding agents, vision models and expert streaming.
+
 Supports dense models (LLaMA, Qwen, Mistral), **Mixture-of-Experts** (Qwen-MoE, GPT-OSS, Qwen3.5-MoE, Qwen3.6-35B-A3B, Qwen3-235B-A22B, DeepSeek-V2/V3, Poolside Laguna, Kimi K3 2.8T, Qwen3.8-Flash-Next 180B), **Mamba/attention hybrids** (Nemotron-3-Nano-4B, Nemotron-3-Super-120B, Nemotron 3.5 Super VL 120B), and **multimodal** models (Muse Glimmer, Qwen3.8-27B, Qwen3.8-Flash-Next, Nemotron 3.5 Super VL, and the block-diffusion DiffusionGemma). Compatible with hybrid attention architectures, attention sinks, sliding-window attention, and linear attention layers (including Gated DeltaNet).
 
 **With both weight and KV cache compression at 3-bit, GPT-OSS-120B fits its full 131K context window in 50 GB on a 64 GB MacBook — and KV cache compression actually makes generation *faster* on the 120B (8.7 vs 6.4 tok/s) because the smaller cache cuts memory bandwidth more than dequant costs.**
@@ -41,7 +43,7 @@ Supports dense models (LLaMA, Qwen, Mistral), **Mixture-of-Experts** (Qwen-MoE, 
 | **[Nemotron-3-Super-120B-A12B (hybrid for 48GB)](https://huggingface.co/manjunathshiva/Nemotron-3-Super-120B-A12B-tq3a-tq2e-g32)** | **TQ 3-attn / 2-experts, gs=32** | **2/3 mix** | **—** | **~36 GB** | **~27.2 tok/s** |
 | **[Laguna-XS.2 (33B agentic coder)](https://huggingface.co/manjunathshiva/Laguna-XS.2-tq3-g64)** | **TurboQuant, gs=64** | **3** | **—** | **13.8 GB** | **46.8 tok/s · 32 GB Mac · Opencode pass** |
 | Laguna-S-2.1 (118B) | BF16 (original) | 16 | — | ~219 GB | *Doesn't fit 64GB* |
-| Laguna-S-2.1 (118B) | [Affine 4-bit](https://huggingface.co/mlx-community/Laguna-S-2.1-4bit) | 4 | — | ~64 GB | *Exceeds Metal's ~56 GB working set — won't load* |
+| Laguna-S-2.1 (118B) | Affine 4-bit (mlx-community; since removed from Hugging Face) | 4 | — | ~64 GB | *Exceeds Metal's ~56 GB working set — won't load* |
 | **[Laguna-S-2.1 (118B, ternary experts)](https://huggingface.co/manjunathshiva/Laguna-S-2.1-tqTe-g64)** | **TQ 3-attn / ternary trit-packed experts, gs=64** | **1.6/3 mix** | **—** | **~27 GB** | **~12.5 tok/s · fully resident on 64 GB with ~25 GB spare · Opencode pass** |
 | **Kimi K3 (2.8T MoE)** | **TQ 3-attn / ternary experts / 4-bit expert-down, gs=64** | **1.6/3/4 mix** | **—** | **931 GB** | **2.3 tok/s (Mac Studio 512 GB, top-8) · 1.2 tok/s at native top-16 · streams experts from disk** |
 | DiffusionGemma-26B-A4B (block-diffusion MoE) | [Affine 4-bit (mlx-community)](https://huggingface.co/mlx-community/diffusiongemma-26B-A4B-it-4bit) | 4 | — | 15.0 GB | ~35 tok/s |
@@ -301,7 +303,7 @@ python -m turboquant_mlx.convert \
 ### 2. Generate text
 
 ```bash
-turboquant-generate \\
+turboquant-generate \
     --model ./gpt-oss-20b-tq2 \
     --prompt "Why is the sky blue? Explain in simple terms." \
     --max-tokens 200
@@ -849,7 +851,7 @@ The converter automatically:
 #### Step 2: Generate text
 
 ```bash
-turboquant-generate \\
+turboquant-generate \
     --model ./gpt-oss-20b-tq3 \
     --prompt "Explain quantum entanglement to a 10-year-old." \
     --max-tokens 256
@@ -908,7 +910,7 @@ python -m turboquant_mlx.convert \
 #### Step 2: Generate text
 
 ```bash
-turboquant-generate \\
+turboquant-generate \
     --model ./gpt-oss-120b-tq3 \
     --prompt "Explain quantum computing in simple terms." \
     --max-tokens 200
@@ -961,7 +963,7 @@ python -m turboquant_mlx.convert \
 #### Step 2: Generate text
 
 ```bash
-turboquant-generate \\
+turboquant-generate \
     --model ./qwen3.5-122b-tq3 \
     --prompt "Why is the sky blue? Explain in simple terms." \
     --max-tokens 200
@@ -1180,7 +1182,7 @@ python -m turboquant_mlx.convert \
 Nemotron-3's chat template ends in a `<think>\n` scaffold that primes EOS as the top-1 logit at the start of the assistant turn. Pass `--min-tokens` to mask EOS for the first N tokens so the model enters the think phase:
 
 ```bash
-turboquant-generate \\
+turboquant-generate \
     --model ./nemotron-3-super-120b-tq3 \
     --prompt "Why is the sky blue?" \
     --max-tokens 200 --min-tokens 50
@@ -1229,7 +1231,7 @@ avoid degenerate tail loops at >1500 tokens. The recommended decode config
 recall clean):
 
 ```bash
-turboquant-generate \\
+turboquant-generate \
     --model ./nemotron-3-super-120b-tq3a-tq2e-g32 \
     --prompt "Why is the sky blue?" \
     --max-tokens 4096 --min-tokens 50 \
@@ -1890,7 +1892,7 @@ Options:
 | Qwen3-MoE | `qwen3_moe` | Yes (128 experts, top-8) | Tested — Qwen3-235B-A22B converted to a hybrid **tq3a-tq2e** build (70.5 GB) on a 16 GB Mac mini via `--streaming`; streams and passes 5/6 quality probes on a 64 GB Mac |
 | Nemotron-H (Mamba/attention hybrid) | `nemotron_h` | Yes (512 experts w/ latent MoE on Super-120B) | Tested (Nano-4B, Super-120B) — requires mlx-lm ≥ 0.31.3 |
 | Poolside Laguna (SWA + global attn, per-head gating) | `laguna` | Yes (256 experts, top-8/top-10) | Tested (XS.2 33B at 3-bit; S-2.1 118B at ternary 1.58-bit — both convert + generate + Opencode agentic pass; expert streaming wired for both). Custom arch — MLX port + loader shipped here (mlx-lm has no native `laguna`); logit-parity 2e-7 vs transformers |
-| DeepSeek-V2 / V3 (MLA + MoE) | `deepseek_v2` / `deepseek_v3` / `deepseek_v32` | Yes (SwitchGLU experts) | Tested (V2-Lite: convert + resident + streaming, coherent at 3-bit); V3/V3.2 share the MLA+MoE layout and reuse the config (untested — need ~250 GB disk) |
+| DeepSeek-V2 / V3 (MLA + MoE) | `deepseek_v2` / `deepseek_v3` / `deepseek_v32` | Yes (SwitchGLU experts) | V2-Lite tested (convert + resident + streaming, coherent at 3-bit). V3/V3.2 share the MLA+MoE layout and reuse the config, but are **untested** (they need ~250 GB of disk) |
 | Kimi K3 (KDA linear-attn + gated-NoPE MLA, Stable LatentMoE) | `kimi_k3` | Yes (896 experts, top-16 + 2 shared) | Tested (2.8T: mxfp4 source → 931 GB `tq3a-tqTe-down4-g64`, streams from disk on a 512 GB Mac Studio; does **not** fit resident on any Mac). Custom arch — MLX port shipped here (mlx-lm has no native `kimi_k3`); fp32 forward parity ≤ 2.7e-6 vs transformers. Needs `[kimi]` extra |
 | Sarvam MoE (Megatron-style fused QKV, DeepSeek-V3 routing) | `sarvam_moe` | Yes | Port tested against fp32 (7122/7122 tensors, layer-1 parity 5.4e-7). Custom arch — MLX port shipped here. **No quantized build published**: 4-bit degenerates on long generations (53% of trials; mlx-lm affine 4-bit 100%) |
 | Muse Glimmer (dense VLM: gated attention, sandwich norms, sliding/NoPE mix, ViT-G/14) | `muse_glimmer` | No | Tested (29.8B: `tq4-g64` beats affine 4-bit on PPL — 4.3315 vs 4.3798 — in 25% less space; `tq3-g64` = 12.53 GiB). Structural match verified against the checkpoint, 1436/1436 tensors. Needs **mlx-vlm >= 0.6.12** ([#1838](https://github.com/Blaizzy/mlx-vlm/pull/1838), merged) — see [Muse Glimmer](#muse-glimmer-30b-dense-vlm) |
