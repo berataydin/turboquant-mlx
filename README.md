@@ -129,7 +129,7 @@ from turboquant_mlx.layers import TurboQuantKVCache, convert_cache_to_turboquant
 ### Requirements
 
 - macOS with Apple Silicon (M1/M2/M3/M4)
-- Python 3.10+
+- Python 3.11+ (mlx-lm 0.32 needs it; on 3.10, pip installs turboquant-mlx-full 0.28.x)
 - 64 GB unified memory recommended for 20B+ models
 
 The Metal kernels are JIT-compiled by MLX at first use, so no Xcode / CMake
@@ -151,10 +151,11 @@ pip install "turboquant-mlx-full[vlm]"    # multimodal / diffusion models via ml
 pip install "turboquant-mlx-full[kimi]"   # Kimi K3's tiktoken-based tokenizer
 ```
 
-> **Muse Glimmer needs mlx-vlm >= 0.6.12**, the first release carrying its MLX
-> model classes ([Blaizzy/mlx-vlm#1838](https://github.com/Blaizzy/mlx-vlm/pull/1838),
-> merged 2026-08-10). `[vlm]` pins that floor, so the one-liner above is all you
-> need — the git pin previously documented here is obsolete.
+> **`[vlm]` installs mlx-vlm >= 0.7.9**, which `turboquant-serve-vlm` needs since
+> the mlx-lm 0.32 port. That also covers Muse Glimmer, whose embedding layout
+> settled in 0.6.12 ([Blaizzy/mlx-vlm#1838](https://github.com/Blaizzy/mlx-vlm/pull/1838),
+> merged 2026-08-10), so the one-liner above is all you need — the git pin
+> previously documented here is obsolete.
 
 > **Qwen3.8-Flash-Next needs `turboquant-mlx-full >= 0.26.0`**, and `>= 0.27.0` for
 > `--ngram-offload` (0 swapouts inside requests on a 64 GB Mac, measured). Text runs on the
@@ -419,6 +420,8 @@ All `mlx_vlm.server` flags forward unchanged. Two things are handled for you:
 
 It listens on `127.0.0.1` unless you pass `--host` (mlx-vlm's own server binds
 `0.0.0.0`). Add `--host 0.0.0.0` to accept connections from other machines.
+Every request must name a `model` (mlx-vlm 0.7 answers 422 without one); use
+the id `GET /v1/models` reports.
 
 #### Serve a model bigger than RAM (expert streaming)
 

@@ -148,6 +148,9 @@ def stub_model(monkeypatch):
     import mlx_lm.utils as mlx_utils
 
     monkeypatch.setattr(mlx_utils, "_get_classes", lambda config: (_Tiny, _TinyArgs))
+    # TurboQuant's loader resolves kimi_k3 through its own port, not _get_classes.
+    monkeypatch.setattr(compat, "get_model_classes",
+                        lambda config: (_Tiny, _TinyArgs))
     monkeypatch.setattr(
         mlx_utils, "load_model",
         lambda model_path, lazy=False, model_config=None, **kw:
@@ -385,7 +388,10 @@ def test_serve_streaming_path_passes_trust_through(monkeypatch, hub):
     for flag in (False, True):
         with pytest.raises(_Stop):
             _provider(trust_remote_code=flag).load(hub.repo)
-    assert seen == [{"trust_remote_code": None}, {"trust_remote_code": True}]
+    # An unregistered repo keeps the server's explicit False (a refusal, never
+    # transformers' interactive prompt); only the operator's registered K3
+    # directory is mapped back to "unset" (test_serve_operator_local_k3_model_loads).
+    assert seen == [{"trust_remote_code": False}, {"trust_remote_code": True}]
 
 
 def test_load_streaming_passes_tokenizer_config_on(monkeypatch, local_k3):
@@ -508,6 +514,35 @@ def test_convert_trust_flag_loads_hub_repo(hub, tmp_path, monkeypatch):
     with pytest.raises(_Stop):
         convert(hub.repo, str(tmp_path / "out"), trust_remote_code=True)
     assert hub.marker.exists()
+
+
+@pytest.mark.parametrize("flag", [True, False])
+def test_convert_model_code_gate_follows_only_the_users_flag(
+        local_k3, tmp_path, monkeypatch, flag):
+    """mlx-lm 0.32 refuses a source's own model code (`model_file`) unless
+    `load_model` gets trust_remote_code=True. `--trust-remote-code` must reach
+    it; the automatic local-K3 trust is for the tokenizer only and must not."""
+    import mlx_lm.utils as mlx_utils
+
+    from turboquant_mlx.convert import convert
+
+    seen = []
+    stub = mlx_utils.load_model
+
+    def load_model(*args, trust_remote_code=False, **kw):
+        seen.append(trust_remote_code)
+        return stub(*args, **kw)
+
+    def save(*a, **k):
+        raise _Stop
+
+    monkeypatch.setattr(mlx_utils, "load_model", load_model)
+    monkeypatch.setattr(mlx_utils, "save", save)
+    compat.trust_local_kimi_k3(local_k3.path)
+    with pytest.raises(_Stop):
+        convert(str(local_k3.path), str(tmp_path / "out"),
+                trust_remote_code=flag)
+    assert seen == [flag]
 
 
 # -- converters -------------------------------------------------------------

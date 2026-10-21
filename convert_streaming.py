@@ -26,12 +26,11 @@ from mlx_lm.utils import (
     MAX_FILE_SIZE_GB,
     create_model_card,
     hf_repo_to_path,
-    load,
     save_config,
 )
 
 import turboquant_mlx.compat  # noqa: F401 — registers upstream patches on import
-from turboquant_mlx.compat import is_local_kimi_k3
+from turboquant_mlx.compat import is_local_kimi_k3, load_source
 from turboquant_mlx.config import TurboQuantConfig
 from turboquant_mlx.quantize_model import turboquant_quantize
 
@@ -152,7 +151,8 @@ def convert_streaming(
     )
 
     print(f"[INFO] Loading model from {hf_path} (lazy)")
-    model, tokenizer, config = load(
+    # Through our own ports for their types; see compat.LOCAL_PORTS.
+    model, tokenizer, config = load_source(
         hf_path,
         # K3's custom tokenizer class (tokenization_kimi.py) needs the code
         # opt-in; gated on the user's own path being a local kimi_k3 dir.
@@ -160,8 +160,10 @@ def convert_streaming(
             {"trust_remote_code": True}
             if trust_remote_code or is_local_kimi_k3(hf_path) else {}
         ),
-        return_config=True,
         lazy=True,
+        # Only the user's own flag opens mlx-lm 0.32's gate on a source's
+        # model code (`model_file`); the local-K3 rule covers the tokenizer.
+        trust_remote_code=trust_remote_code,
     )
     arch = config.get("model_type", "unknown")
     print(f"[INFO] Streaming TurboQuant convert: {bits}-bit, gs={group_size}, "
