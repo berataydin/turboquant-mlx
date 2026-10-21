@@ -2,7 +2,7 @@
 
 Extreme **weight** and **KV cache** compression for LLMs on Apple Silicon. MLX implementation of Google's [TurboQuant](https://arxiv.org/abs/2504.19874) (Zandieh et al., 2025) — Hadamard rotation + Lloyd-Max codebooks applied both to weights (compile time) and the KV cache (run time).
 
-Supports dense models (LLaMA, Qwen, Mistral), **Mixture-of-Experts** (Qwen-MoE, GPT-OSS, Qwen3.5-MoE, Qwen3.6-35B-A3B, Qwen3-235B-A22B, DeepSeek-V2/V3, Qwen3.8-Flash-Next 180B), **Mamba/attention hybrids** (Nemotron-3-Nano-4B, Nemotron-3-Super-120B), and **multimodal** models (Muse Glimmer, Qwen3.8-27B, Qwen3.8-Flash-Next). Compatible with hybrid attention architectures, attention sinks, sliding-window attention, and linear attention layers (including Gated DeltaNet).
+Supports dense models (LLaMA, Qwen, Mistral), **Mixture-of-Experts** (Qwen-MoE, GPT-OSS, Qwen3.5-MoE, Qwen3.6-35B-A3B, Qwen3-235B-A22B, DeepSeek-V2/V3, Poolside Laguna, Kimi K3 2.8T, Qwen3.8-Flash-Next 180B), **Mamba/attention hybrids** (Nemotron-3-Nano-4B, Nemotron-3-Super-120B, Nemotron 3.5 Super VL 120B), and **multimodal** models (Muse Glimmer, Qwen3.8-27B, Qwen3.8-Flash-Next, Nemotron 3.5 Super VL, and the block-diffusion DiffusionGemma). Compatible with hybrid attention architectures, attention sinks, sliding-window attention, and linear attention layers (including Gated DeltaNet).
 
 **With both weight and KV cache compression at 3-bit, GPT-OSS-120B fits its full 131K context window in 50 GB on a 64 GB MacBook — and KV cache compression actually makes generation *faster* on the 120B (8.7 vs 6.4 tok/s) because the smaller cache cuts memory bandwidth more than dequant costs.**
 
@@ -19,19 +19,22 @@ Supports dense models (LLaMA, Qwen, Mistral), **Mixture-of-Experts** (Qwen-MoE, 
 | GPT-OSS-20B | Affine (mlx-lm) | 4 | — | 11.2 GB | 148 tok/s |
 | GPT-OSS-20B | MXFP4 (original) | 4 | 83.04 | 12.8 GB | — |
 | GPT-OSS-20B | TurboQuant | 4 | 72.63 | 11.2 GB | — |
-| GPT-OSS-20B | TurboQuant | 3 | 78.60 | 9.3 GB | **73 tok/s** |
+| [GPT-OSS-20B](https://huggingface.co/manjunathshiva/gpt-oss-20b-tq3) | TurboQuant | 3 | 78.60 | 9.3 GB | **73 tok/s** |
 | GPT-OSS-120B | [Affine 4-bit (mlx-community)](https://huggingface.co/mlx-community/gpt-oss-120b-4bit) | 4 | — | 65.8 GB | *Doesn't fit 64GB* |
 | GPT-OSS-120B | MXFP4 (original) | 4 | — | 63.5 GB | *Doesn't fit 64GB* |
 | GPT-OSS-120B | TurboQuant | 3 | — | 48 GB | **44 tok/s** |
 | **[GPT-OSS-120B (hybrid for 48GB)](https://huggingface.co/manjunathshiva/gpt-oss-120b-tq3a-tq2e-g32)** | **TQ 3-attn / 2-experts, gs=32** | **2/3 mix** | **—** | **~35 GB** | **42–50 tok/s** |
 | GPT-OSS-120B | TurboQuant | 2 | — | 32 GB | 51 tok/s (poor quality) |
 | Qwen3.5-122B-A10B | BF16 (original) | 16 | — | ~240 GB | *Doesn't fit 64GB* |
-| **Qwen3.5-122B-A10B** | **TurboQuant** | **3** | **—** | **~50 GB** | **26.5 tok/s (64 GB) · streams on a 16 GB Mac mini** |
+| **[Qwen3.5-122B-A10B](https://huggingface.co/manjunathshiva/qwen3.5-122b-tq3)** | **TurboQuant** | **3** | **—** | **~50 GB** | **26.5 tok/s (64 GB) · streams on a 16 GB Mac mini** |
+| **[Qwen3.5-122B-A10B (ternary experts)](https://huggingface.co/manjunathshiva/Qwen3.5-122B-A10B-tq3a-tqTe-g64)** | **TQ 3-attn / ternary trit-packed experts, gs=64** | **1.6/3 mix** | **—** | **30.9 GB** | **~13 tok/s · 32.5 GB peak, resident on 48 GB Macs without sysctl · 6/6 stress** |
 | **[Qwen3.6-35B-A3B](https://huggingface.co/manjunathshiva/Qwen3.6-35B-A3B-tq3-g32)** | **TurboQuant, gs=32** | **3** | **—** | **~16 GB** | **~60 tok/s (resident) · runs in <4 GB via streaming** |
+| **[Qwen3.6-35B-A3B (ternary experts)](https://huggingface.co/manjunathshiva/Qwen3.6-35B-A3B-tq3a-tqTe-g64)** | **TQ 3-attn / ternary trit-packed experts, gs=64** | **1.6/3 mix** | **—** | **9.4 GB** | **~10.4 tok/s fully resident on a 16 GB Mac mini (~33 tok/s M4 Max) · chat; not for agent harnesses** |
+| **[Qwen3.6-35B-A3B (ternary + 4-bit expert-down)](https://huggingface.co/manjunathshiva/Qwen3.6-35B-A3B-tq3a-tqTe-down4-g64)** | **TQ 3-attn / ternary experts / 4-bit expert-down, gs=64** | **1.6/3/4 mix** | **—** | **12.6 GB** | **15.2–15.6 tok/s on a 16 GB Mac mini (sysctl) · Opencode agentic 3/3** |
 | **[Qwen3.6-27B (dense coder)](https://huggingface.co/manjunathshiva/Qwen3.6-27B-tq3-g32)** | **TurboQuant, gs=32** | **3** | **—** | **~13 GB** | **~14 tok/s (resident) · fits 48 GB, SWE-bench coder** |
 | **[Qwen3-235B-A22B-Instruct-2507 (hybrid)](https://huggingface.co/manjunathshiva/Qwen3-235B-A22B-Instruct-2507-tq3a-tq2e-g32)** | **TQ 3-attn / 2-experts, gs=32** | **2/3 mix** | **—** | **70.5 GB** | **~4–6 tok/s (64 GB, 40 GB cache) · converts + streams on a 16 GB Mac mini** |
 | **[Qwen3-235B-A22B-Instruct-2507 (full 3-bit)](https://huggingface.co/manjunathshiva/Qwen3-235B-A22B-Instruct-2507-tq3-g32)** | **TurboQuant, gs=32** | **3** | **—** | **103 GB** | **~1.3 tok/s (64 GB, 40 GB cache) · recall-critical sibling, passes 6/6 stress** |
-| **Qwen3-235B-A22B-Instruct-2507 (ternary experts, 1.58-bit)** | **TQ 3-attn / ternary trit-packed experts, gs=64** | **1.6/3 mix** | **—** | **53 GB** | **5.6 tok/s (64 GB) · fully resident, no streaming** |
+| **[Qwen3-235B-A22B-Instruct-2507 (ternary experts, 1.58-bit)](https://huggingface.co/manjunathshiva/Qwen3-235B-A22B-Instruct-2507-tq3a-tqTe-g64)** | **TQ 3-attn / ternary trit-packed experts, gs=64** | **1.6/3 mix** | **—** | **53 GB** | **5.6 tok/s (64 GB) · fully resident, no streaming** |
 | **Nemotron-3-Nano-4B** | **TurboQuant** | **3** | **—** | **~2.2 GB** | **75.6 tok/s** |
 | Nemotron-3-Super-120B-A12B | BF16 (original) | 16 | — | ~240 GB | *Doesn't fit 64GB* |
 | **Nemotron-3-Super-120B-A12B** | **TurboQuant** | **3** | **—** | **~50 GB** | **18.7 tok/s** |
@@ -41,9 +44,12 @@ Supports dense models (LLaMA, Qwen, Mistral), **Mixture-of-Experts** (Qwen-MoE, 
 | Laguna-S-2.1 (118B) | [Affine 4-bit](https://huggingface.co/mlx-community/Laguna-S-2.1-4bit) | 4 | — | ~64 GB | *Exceeds Metal's ~56 GB working set — won't load* |
 | **[Laguna-S-2.1 (118B, ternary experts)](https://huggingface.co/manjunathshiva/Laguna-S-2.1-tqTe-g64)** | **TQ 3-attn / ternary trit-packed experts, gs=64** | **1.6/3 mix** | **—** | **~27 GB** | **~12.5 tok/s · fully resident on 64 GB with ~25 GB spare · Opencode pass** |
 | **Kimi K3 (2.8T MoE)** | **TQ 3-attn / ternary experts / 4-bit expert-down, gs=64** | **1.6/3/4 mix** | **—** | **931 GB** | **2.3 tok/s (Mac Studio 512 GB, top-8) · 1.2 tok/s at native top-16 · streams experts from disk** |
+| DiffusionGemma-26B-A4B (block-diffusion MoE) | [Affine 4-bit (mlx-community)](https://huggingface.co/mlx-community/diffusiongemma-26B-A4B-it-4bit) | 4 | — | 15.0 GB | ~35 tok/s |
+| **[DiffusionGemma-26B-A4B](https://huggingface.co/manjunathshiva/diffusiongemma-26B-A4B-it-tq3-g32)** | **TurboQuant, gs=32** | **3** | **—** | **13.8 GB** | **~4.6 tok/s · experimental: slower than 4-bit** |
+| **[DiffusionGemma-26B-A4B (16 GB build)](https://huggingface.co/manjunathshiva/diffusiongemma-26B-A4B-it-mini-g32)** | **TQ 3-attn / 2-experts, 6 layers protected at 3-bit / 8-bit extras, gs=32** | **2/3 mix** | **—** | **9.79 GB** | **~1.5 tok/s on a 16 GB Mac mini (sysctl) · experimental** |
 | Muse Glimmer (30B dense VLM) | [Affine 4-bit](https://huggingface.co/mlx-community/Muse-Glimmer-30B-4bit) | 4 | 4.3798 | 19.88 GiB | 26.1 tok/s · leaves embedding + vision tower at bf16 |
-| **Muse Glimmer (30B dense VLM)** | **TurboQuant, gs=64** | **4** | **4.3315** | **14.88 GiB** | **9.4 tok/s · better PPL than affine 4-bit in 25% less space** |
-| **Muse Glimmer (30B dense VLM)** | **TurboQuant, gs=64** | **3** | **5.0454** | **12.53 GiB** | **10.9 tok/s · smallest coherent build** |
+| **[Muse Glimmer (30B dense VLM)](https://huggingface.co/manjunathshiva/Muse-Glimmer-30B-tq4-g64)** | **TurboQuant, gs=64** | **4** | **4.3315** | **14.88 GiB** | **9.4 tok/s · better PPL than affine 4-bit in 25% less space** |
+| **[Muse Glimmer (30B dense VLM)](https://huggingface.co/manjunathshiva/Muse-Glimmer-30B-tq3-g64)** | **TurboQuant, gs=64** | **3** | **5.0454** | **12.53 GiB** | **10.9 tok/s · smallest coherent build** |
 | Qwen3.8-27B (dense 27.8B hybrid-GDN VLM) | BF16 (original) | 16 | — | 55.6 GB | *Needs a 64 GB Mac just to load* |
 | Qwen3.8-27B | [Affine 4-bit (mlx-community)](https://huggingface.co/mlx-community/Qwen3.8-27B-4bit) | 4 | 7.2685 | 14.95 GiB | **29.7 tok/s** — fastest 4-bit, but peaks 16.16 GiB: *won't fit 16 GB* |
 | **[Qwen3.8-27B](https://huggingface.co/manjunathshiva/Qwen3.8-27B-tq4-g64)** | **TurboQuant, gs=64** | **4** | **7.2496** | **15.15 GiB** | **11.3 tok/s · best PPL of the three · Opencode agentic pass · vision 4/4** |
@@ -51,6 +57,10 @@ Supports dense models (LLaMA, Qwen, Mistral), **Mixture-of-Experts** (Qwen-MoE, 
 | Qwen3.8-Flash-Next (180B MoE, 512 experts) | [Affine oQ2 (Vontra)](https://huggingface.co/Vontra/Qwen3.8-Flash-Next-MLX-oQ2) | 2 | — | 63.03 GiB | *Too big to load resident on a 64 GB Mac* |
 | Qwen3.8-Flash-Next | [imatrix iQ-MLX 3.3 bpw (ddalcu, for mlx-serve)](https://huggingface.co/ddalcu/Qwen3.8-Flash-Next-MLX-Serve-iQ-MLX-3.3bpw) | 3.3 | — | 50.6 GiB | *Fits 64 GB per its card; not measured here* |
 | **[Qwen3.8-Flash-Next](https://huggingface.co/manjunathshiva/Qwen3.8-Flash-Next-tq4a-tq2e-g64)** | **TQ 4-attn / 2-experts / 2-bit affine n-gram table, data-free** | **2/4 mix** | **9.31** | **52.00 GiB** + 0.84 GiB vision | **16–18 tok/s · fully resident on 64 GB · vision passes** |
+| NVIDIA Nemotron 3.5 Super VL 120B (VLM, 512 experts, top-22) | BF16 (original) | 16 | — | 249 GB | *Doesn't fit 64GB* |
+| Nemotron 3.5 Super VL 120B | NVFP4 (NVIDIA) | 4 | — | 63.0 GiB | *Doesn't fit resident on a 64 GB Mac* |
+| **[Nemotron 3.5 Super VL 120B (ternary experts)](https://huggingface.co/manjunathshiva/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-tq3a-tqTe-g64)** | **TQ 3-attn / ternary trit-packed experts / 8-bit affine extras, gs=64** | **1.6/3 mix** | **—** | **29.29 GiB** | **~7–8 tok/s · fully resident on 64 GB at default settings · 36K context · text 6/6, vision 3/3** |
+| **[Nemotron 3.5 Super VL 120B (3-bit)](https://huggingface.co/manjunathshiva/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-tq3-g64)** | **TurboQuant, gs=64** | **3** | **—** | **50.22 GiB** | **~19–21 tok/s · 64 GB with `sysctl` + `--prefill-step-size 256`** |
 
 ## Key Results — KV Cache Compression
 
@@ -998,6 +1008,11 @@ A pre-converted 3-bit (group-size 32) model is on the Hub:
 
 → [`manjunathshiva/Qwen3.6-35B-A3B-tq3-g32`](https://huggingface.co/manjunathshiva/Qwen3.6-35B-A3B-tq3-g32) — ~16 GB on disk; ~60 tok/s at ~18 GB peak when fully resident on a 64 GB Mac.
 
+Two smaller builds run **fully resident on a 16 GB Mac mini**, with no streaming:
+
+- → [`Qwen3.6-35B-A3B-tq3a-tqTe-g64`](https://huggingface.co/manjunathshiva/Qwen3.6-35B-A3B-tq3a-tqTe-g64): ternary experts, **9.4 GB**, ~10.4 tok/s on the mini at the default memory limit. Good for chat; it does not hold up in agent harnesses.
+- → [`Qwen3.6-35B-A3B-tq3a-tqTe-down4-g64`](https://huggingface.co/manjunathshiva/Qwen3.6-35B-A3B-tq3a-tqTe-down4-g64): ternary experts with a 4-bit expert `down_proj`, **12.6 GB**, 15.2–15.6 tok/s on the mini (needs `sudo sysctl -w iogpu.wired_limit_mb=13824`). Passes an Opencode agentic task 3/3.
+
 #### Run it fully resident (64 GB)
 
 ```bash
@@ -1791,6 +1806,46 @@ Three things to know:
   this pack. What this build offers instead: a calibration-free recipe, a vision
   tower, and with `--ngram-offload`, a 34 GiB resident footprint.
 
+### NVIDIA Nemotron 3.5 Super VL (120B VLM, 512 experts)
+
+**Hardware:** a 64 GB Mac (M4 Max, measured). NVIDIA's vision-language model mixes Mamba-2,
+attention (8 of 88 layers) and a latent MoE (512 experts, 22 active per token), with a RADIO
+vision tower. mlx-vlm >= 0.7.9 runs the architecture (`nemotron_h_omni`); this package sets
+the quantization. Neither the BF16 original (249 GB) nor NVIDIA's NVFP4 (63 GiB) fits
+resident on a 64 GB Mac. Needs `turboquant-mlx-full[vlm] >= 0.29.0`.
+
+| Build | Size | Settings on a 64 GB Mac | Decode | Notes |
+|---|---|---|---|---|
+| [`tq3a-tqTe-g64`](https://huggingface.co/manjunathshiva/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-tq3a-tqTe-g64) (ternary experts) | 29.29 GiB | **none** | ~7–8 tok/s | 44.7 GB peak at a 36K-token prompt; text 6/6, vision 3/3 |
+| [`tq3-g64`](https://huggingface.co/manjunathshiva/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-tq3-g64) (3-bit) | 50.22 GiB | `sysctl iogpu.wired_limit_mb=60416` **and** `--prefill-step-size 256` | ~19–21 tok/s | without the smaller prefill step, a ~4,000-word prompt runs out of GPU memory |
+
+```bash
+pip install "turboquant-mlx-full[vlm]>=0.29.0"
+
+python -m turboquant_mlx.generate_vlm \
+    --model manjunathshiva/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-tq3a-tqTe-g64 \
+    --image invoice.png --prompt "What is the invoice number and the total due?" \
+    --max-tokens 512 --temp 0.6
+
+turboquant-serve-vlm --model manjunathshiva/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-tq3a-tqTe-g64 --port 8080
+```
+
+To convert it yourself (about 2 minutes, ~41 GB peak memory for the ternary build):
+
+```bash
+python -m turboquant_mlx.convert_vlm \
+    --hf-path nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-BF16 \
+    --mlx-path ./Nemotron-3.5-Super-VL-tq3a-tqTe-g64 \
+    --bits 3 --group-size 64 --ternary-experts --quantize-extras
+```
+
+- **Reasoning is off by default:** the chat template thinks only with `enable_thinking=True`.
+  With it on, the ternary build kept a 7,442-token trace coherent and answered correctly.
+- **Memory barely grows with context:** only 8 layers hold KV (about 8 KB per token), so the
+  peak at 36K tokens is close to the peak at 4K. `turboquant-plan` reads the geometry but
+  currently projects about 3.5 GB below the measured peak for this model.
+- `lm_head` and the vision projector `mlp1` stay off the polar path; the MTP head is dropped.
+
 ---
 
 ## How It Works
@@ -1840,6 +1895,7 @@ Options:
 | Sarvam MoE (Megatron-style fused QKV, DeepSeek-V3 routing) | `sarvam_moe` | Yes | Port tested against fp32 (7122/7122 tensors, layer-1 parity 5.4e-7). Custom arch — MLX port shipped here. **No quantized build published**: 4-bit degenerates on long generations (53% of trials; mlx-lm affine 4-bit 100%) |
 | Muse Glimmer (dense VLM: gated attention, sandwich norms, sliding/NoPE mix, ViT-G/14) | `muse_glimmer` | No | Tested (29.8B: `tq4-g64` beats affine 4-bit on PPL — 4.3315 vs 4.3798 — in 25% less space; `tq3-g64` = 12.53 GiB). Structural match verified against the checkpoint, 1436/1436 tensors. Needs **mlx-vlm >= 0.6.12** ([#1838](https://github.com/Blaizzy/mlx-vlm/pull/1838), merged) — see [Muse Glimmer](#muse-glimmer-30b-dense-vlm) |
 | Qwen3.8-Flash-Next (Gated DeltaNet + Qwen Sparse Attention, n-gram/PLE embedding, hyper-connections; Qwen3-VL tower) | `qwen4_exp` | Yes (512 experts, top-10, 640 wide) | Tested (180B: `tq4a-tq2e-g64` = 52.00 GiB, fully resident on a 64 GB Mac at 16–18 tok/s; vision through mlx-vlm's Qwen3-VL tower). Architecture vendored from the open mlx-lm PR [#1788](https://github.com/ml-explore/mlx-lm/pull/1788) until it merges. `--kv-bits` has no effect on it — see [Qwen3.8-Flash-Next](#qwen38-flash-next-180b-moe-512-experts) |
+| NVIDIA Nemotron 3.5 Super VL (Mamba-2 + attention + latent MoE, RADIO vision tower, via **mlx-vlm**) | `nemotron_h_omni` | Yes (512 experts, top-22, latent MoE) | Tested (120B total, 12B active: ternary `tq3a-tqTe-g64` = 29.29 GiB, resident on a 64 GB Mac at default settings, text 6/6 and vision 3/3; `tq3-g64` = 50.22 GiB at ~20 tok/s with `sysctl` + `--prefill-step-size 256`). mlx-vlm >= 0.7.9 runs the model; `lm_head` and the vision projector `mlp1` stay off the polar path. Needs turboquant-mlx-full >= 0.29.0 |
 | DiffusionGemma (block-diffusion MoE, via **mlx-vlm**) | `diffusion_gemma` | Yes (128 experts, top-8) | Tested (26B-A4B: convert + block-diffusion sampler, coherent at 3-bit — [HF](https://huggingface.co/manjunathshiva/diffusiongemma-26B-A4B-it-tq3-g32)). **Experimental**: decode is much slower than native 4-bit until a batched codebook gather-GEMM kernel lands |
 
 ### mlx-vlm architectures (multimodal / diffusion)
@@ -1848,7 +1904,7 @@ Architectures that live in [mlx-vlm](https://github.com/Blaizzy/mlx-vlm) rather
 than mlx-lm convert and run through dedicated entry points (v0.7.0+):
 
 ```bash
-pip install "turboquant-mlx-full[vlm]"   # adds mlx-vlm >= 0.6.12
+pip install "turboquant-mlx-full[vlm]"   # adds mlx-vlm >= 0.7.9
 
 # Convert (vision towers, routers, and known quant-sensitive blocks stay full precision)
 python -m turboquant_mlx.convert_vlm \
